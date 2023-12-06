@@ -1,3 +1,6 @@
+#cd /rsrch3/home/lym_myl_rsch/MCL_Lab/Qingsong/PDX_single_CQS/SC145_2023/azimuth-references-master/human_bonemarrow
+#conda activate R403
+
 
 library(Seurat)
 library(future)
@@ -45,13 +48,57 @@ nhlbi <- lapply(nhlbi, function(x) {
 hca <- future_lapply(hca, process_objects)
 
 
+nhlbi <- future_lapply(nhlbi, process_objects)
+
+save(hca, nhlbi, file = "tmp.rds")
+
+mpal <- UpdateSeuratObject(mpal)
+
 DefaultAssay(mpal) <- "RNA"
 obj.list <- SplitObject(mpal, split.by = "tissue")
-obj.list <- future_lapply(obj.list, process_objects)
 
 
-nhlbi <- future_lapply(nhlbi, process_objects)
+process_objects2 <- function(x) {
+  x$percent.mt <- PercentageFeatureSet(object = x, pattern = "^MT-")
+  #x <- x[, x$percent.mt < 5]
+  x <- SCTransform(x, variable.features.n = 3000)
+  x <- RunPCA(x)
+  return(x)
+}
+obj.list <- future_lapply(obj.list, process_objects2)
+
+
 obj.list <- c(obj.list, nhlbi, hca)
+
+
+
+ifnb.ori <- RunUMAP(obj.list)
+, dims = 1:30, reduction = "pca", reduction.name = "umap.unintegrated")
+
+#########################################
+ifnb.ori <- NormalizeData(obj.list)
+ifnb.ori <- FindVariableFeatures(ifnb.ori)
+ifnb.ori <- ScaleData(ifnb.ori)
+ifnb.ori <- RunPCA(ifnb.ori)
+
+ifnb.ori <- FindNeighbors(ifnb.ori, dims = 1:30, reduction = "pca")
+ifnb.ori <- FindClusters(ifnb.ori, resolution = 2, cluster.name = "unintegrated_clusters")
+
+ifnb.ori <- RunUMAP(ifnb.ori, dims = 1:30, reduction = "pca", reduction.name = "umap.unintegrated")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 features <- SelectIntegrationFeatures(object.list = obj.list, nfeatures = 3000)
 obj.list <- PrepSCTIntegration(obj.list, anchor.features = features)
