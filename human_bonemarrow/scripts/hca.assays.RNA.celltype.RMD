@@ -1,0 +1,117 @@
+
+```{r}
+library(Seurat)
+library(future)
+library(future.apply)
+#plan("multiprocess", workers = 8)
+options(future.globals.maxSize = Inf)
+set.seed(1234)
+library(stringr)
+ref.bm <- readRDS("../../bonemarrowref.SeuratData/inst/azimuth/ref.Rds")
+
+ref.bm$dataset <- str_split_fixed(colnames(ref.bm), "_",3)[,3]
+ref.bm$dataset2 <- str_split_fixed(colnames(ref.bm), "_",2)[,2]
+unique(ref.bm$dataset)
+unique(ref.bm$dataset2)
+ref.bm@meta.data[ref.bm$dataset %in% "",]$dataset <- ref.bm@meta.data[ref.bm$dataset %in% "",]$dataset2
+unique(ref.bm$dataset)
+ref.bm.list <- SplitObject(object = ref.bm, split.by = "dataset")
+
+ref.bm.hca <- subset(ref.bm, subset = dataset %in% 28:35)
+ref.bm.hca@meta.data$sample <- 
+  paste0(str_split_fixed(colnames(ref.bm.hca),"_",2)[,2]
+)
+unique(ref.bm.hca@meta.data$sample)
+
+ref.bm.hca@meta.data$sample <- str_split_fixed(colnames(ref.bm.hca),"_",2)[,2]
+  #paste0(str_split_fixed(colnames(ref.bm.hca),"-",3)[,3], str_split_fixed(colnames(ref.bm.hca),"_",3)[,2])
+unique(ref.bm.hca@meta.data$sample)
+
+
+ref.bm.hca@meta.data$probe <- str_split_fixed(colnames(ref.bm.hca),"_",3)[,1]
+
+head(ref.bm.hca@meta.data)
+
+ref.bm.hca.list.sample <- SplitObject(object = ref.bm.hca, split.by = "sample")
+```
+
+
+```{r}
+process_objects <- function(x) {
+  x$percent.mt <- PercentageFeatureSet(object = x, pattern = "^MT-")
+  x <- x[, x$percent.mt < 5]
+  x <- SCTransform(x, variable.features.n = 3000)
+  x <- RunPCA(x)
+  return(x)
+}
+
+hca <- readRDS("seurat_objects/hca.scedgCM.rds")
+hca@meta.data$donor <-  str_split_fixed(rownames(hca@meta.data), "_", 2)[,1]
+hca$orig.ident <- hca$donor
+```
+
+```{r}
+hca@meta.data$sample <- 
+    paste0(str_split_fixed(colnames(hca),"-",3)[,3],
+              str_split_fixed(colnames(hca),"-",3)[,1]
+)
+hca@meta.data$probe <-   str_split_fixed(colnames(hca),"-",3)[,2]
+hca.sample.names <- unique(hca@meta.data$sample)
+head(hca@meta.data)
+
+unique(hca@meta.data$sample)
+hca.list.sample <- SplitObject(object = hca, split.by = "sample")
+```
+
+
+```{r}
+for (i in 1:63) {
+  for(j in 1:63) {
+  hca.list.sample[[i]]@meta.data[,paste0("hcaref",i , "___", j)] <- "NO"
+hca.list.sample[[i]]@meta.data[
+  str_split_fixed(colnames(hca.list.sample[[i]]),"-",3)[,2] %in% 
+        str_split_fixed(colnames( ref.bm.hca.list.sample[[j]]),"_",3)[,1],
+][,paste0("hcaref",i,"___", j)]  <- i
+  }
+  }
+
+
+for (i in 1:63) {
+A <- c()
+for(j in 1:63) {
+A <- c(A,table(hca.list.sample[[i]]@meta.data[,c("sample", paste0("hcaref",i , "___", j) )])[,1])
+}
+  
+hca.list.sample[[i]]@meta.data$name_in_ref <- names(ref.bm.hca.list.sample[(1:63)[A %in% max(A)]])
+}
+```
+```{r}
+
+for( i in 1:63) {
+  print(i)
+  print(dim(hca.list.sample[[i]]))
+  print(dim(ref.bm.hca.list.sample[[unique(hca.list.sample[[i]]$name_in_ref)]])) 
+  print( dim(ref.bm.hca.list.sample[[unique(hca.list.sample[[i]]$name_in_ref)]])[2] == dim(subset(hca.list.sample[[i]], subset = probe %in% ref.bm.hca.list.sample[[unique(hca.list.sample[[i]]$name_in_ref)]]$probe))[2])
+  
+  print("____________________________")
+}
+  
+
+for( i in 1:63) {
+hca.list.sample[[i]] <- subset(hca.list.sample[[i]], subset = probe %in% ref.bm.hca.list.sample[[unique(hca.list.sample[[i]]$name_in_ref)]]$probe)
+  
+
+tmpmeta <- ref.bm.hca.list.sample[[unique(hca.list.sample[[i]]$name_in_ref)]]@meta.data
+dim(tmpmeta)
+rownames(tmpmeta) <- tmpmeta$probe
+dim(tmpmeta)
+tmpmeta <- tmpmeta[hca.list.sample[[i]]$probe ,]
+dim(tmpmeta)
+colnames(tmpmeta)
+hca.list.sample[[i]]@meta.data <- cbind(hca.list.sample[[i]]@meta.data,
+                                       tmpmeta[,c(1,2,6,7)] )
+}
+
+saveRDS(hca.list.sample, file = "seurat_objects/hca.list.sample.with_celltype.rds")
+#head(hca.list.sample[[1]]@meta.data)
+```
