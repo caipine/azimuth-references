@@ -1,0 +1,101 @@
+
+```{r}
+hca.donor.list <- readRDS("seurat_objects/hca.donor.list.sct.with_celltype_v2.rds")
+hca.list.sample <- future_lapply(hca.list.sample, remove_ref)
+head(hca.list.sample[[1]])
+hca <- merge(x = hca.list.sample[[1]], y = hca.list.sample[2:length(hca.list.sample)])
+hca.donor.list <- SplitObject(object = hca, split.by = "donor")
+
+
+mpal.list.sample <- readRDS( "seurat_objects/mpal.list.sample.with_celltype.rds")
+head(mpal.list.sample[[1]])
+mpal <- merge(x = mpal.list.sample[[1]], y = mpal.list.sample[2:length(mpal.list.sample)])
+mpal.tissue.list <- SplitObject(object = mpal, split.by = "tissue")
+
+mpal.tissue.list<- lapply(mpal.tissue.list, function(x) {
+  x$orig.ident <- x$tissue
+  x
+})
+head(mpal.tissue.list[[1]])
+
+
+nhlbi.list.sample <- readRDS("seurat_objects/nhlbi.list.sample.with_celltype.rds")
+head(nhlbi.list.sample[[1]])
+length(nhlbi.list.sample)  #25
+nhlbi.list.sample<- lapply(nhlbi.list.sample, function(x) {
+  x$orig.ident <- x$dataset
+  x
+})
+head(nhlbi.list.sample[[1]])
+
+
+head(mpal.tissue.list[[1]]@meta.data)
+obj.list <- c(nhlbi.list.sample, mpal.tissue.list, hca.donor.list)
+obj <- merge(x = obj.list[[1]], y = obj.list[2:length(obj.list)])
+unique(obj$orig.ident)
+
+obj[["RNA"]] <- split(obj[["RNA"]], f = obj$orig.ident)
+obj
+```
+
+```{r}
+DefaultAssay(obj)  <- "RNA"
+obj <- NormalizeData(obj)
+obj <- FindVariableFeatures(obj)
+obj <- ScaleData(obj)
+obj <- RunPCA(obj)
+obj <- FindNeighbors(obj, dims = 1:30, reduction = "pca")
+obj <- FindClusters(obj, resolution = 2, cluster.name = "unintegrated_clusters")
+obj <- RunUMAP(obj, dims = 1:30, reduction = "pca", reduction.name = "umap.unintegrated")
+# visualize by batch and cell type annotation
+# cell type annotations were previously added by Azimuth
+p1 <- DimPlot(obj, reduction = "umap.unintegrated", group.by = c( "orig.ident" , "celltype.l2"), label = T)
+p1
+```
+
+```{r}
+library(Seurat)
+library(SeuratData)
+library(SeuratWrappers)
+library(Azimuth)
+library(ggplot2)
+library(patchwork)
+library(scCustomize)
+library(Signac)
+library(SeuratObject)
+ifnb.FastMNN <- IntegrateLayers(object = obj, 
+                        method = FastMNNIntegration, 
+                        orig.reduction = "pca", 
+                        new.reduction = "integrated.FastMNN",
+                        verbose = FALSE)
+
+# re-join layers after integration
+ifnb.FastMNN[["RNA"]] <- JoinLayers(ifnb.FastMNN[["RNA"]])
+ifnb.FastMNN <- FindNeighbors(ifnb.FastMNN, reduction = "integrated.FastMNN", dims = 1:30)
+ifnb.FastMNN <- FindClusters(ifnb.FastMNN, resolution = 1)
+ifnb.FastMNN <- RunUMAP(ifnb.FastMNN, dims = 1:30, reduction = "integrated.FastMNN")
+
+DimPlot_scCustom(ifnb.FastMNN, reduction = "umap", group.by = c( "celltype.l1"), label = T) +
+  DimPlot_scCustom(ifnb.FastMNN, reduction = "umap", group.by = c( "celltype.l2"), label = T)
+```
+
+
+```{r}
+obj.CCAIntegration <- IntegrateLayers(
+  object = obj, method = CCAIntegration,
+  orig.reduction = "pca", new.reduction = "integrated.cca",
+  verbose = FALSE
+)
+obj.CCAIntegration <- FindNeighbors(obj.CCAIntegration, reduction = "integrated.cca", dims = 1:30)
+obj.CCAIntegration <- FindClusters(obj.CCAIntegration, resolution = 2, cluster.name = "cca_clusters")
+obj.CCAIntegration <- RunUMAP(obj.CCAIntegration, reduction = "integrated.cca", dims = 1:30, reduction.name = "umap.cca")
+p2 <- DimPlot(
+  obj.CCAIntegration,
+  reduction = "umap.cca",
+  group.by = c("celltype.l1", "celltype.l2"),
+  #combine = FALSE, 
+  label.size = 4, label =T
+)
+p2
+```
+
