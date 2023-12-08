@@ -4,6 +4,7 @@ hca.donor.list <- readRDS("seurat_objects/hca.donor.list.sct.with_celltype_v2.rd
 hca.list.sample <- future_lapply(hca.list.sample, remove_ref)
 head(hca.list.sample[[1]])
 hca <- merge(x = hca.list.sample[[1]], y = hca.list.sample[2:length(hca.list.sample)])
+hca
 hca.donor.list <- SplitObject(object = hca, split.by = "donor")
 
 
