@@ -1,0 +1,293 @@
+
+```{r}
+library(Seurat)
+library(future)
+library(future.apply)
+#plan("multiprocess", workers = 8)
+options(future.globals.maxSize = Inf)
+set.seed(1234)
+library(stringr)
+ref.bm <- readRDS("../../bonemarrowref.SeuratData/inst/azimuth/ref.Rds")
+
+ref.bm$dataset <- str_split_fixed(colnames(ref.bm), "_",3)[,3]
+ref.bm$dataset2 <- str_split_fixed(colnames(ref.bm), "_",2)[,2]
+unique(ref.bm$dataset)
+unique(ref.bm$dataset2)
+ref.bm@meta.data[ref.bm$dataset %in% "",]$dataset <- ref.bm@meta.data[ref.bm$dataset %in% "",]$dataset2
+unique(ref.bm$dataset)
+ref.bm.list <- SplitObject(object = ref.bm, split.by = "dataset")
+
+ref.bm.hca <- subset(ref.bm, subset = dataset %in% 28:35)
+ref.bm.hca@meta.data$sample <- 
+  paste0(str_split_fixed(colnames(ref.bm.hca),"_",2)[,2]
+)
+unique(ref.bm.hca@meta.data$sample)
+
+ref.bm.hca@meta.data$sample <- str_split_fixed(colnames(ref.bm.hca),"_",2)[,2]
+  #paste0(str_split_fixed(colnames(ref.bm.hca),"-",3)[,3], str_split_fixed(colnames(ref.bm.hca),"_",3)[,2])
+unique(ref.bm.hca@meta.data$sample)
+
+
+ref.bm.hca@meta.data$probe <- str_split_fixed(colnames(ref.bm.hca),"_",3)[,1]
+
+head(ref.bm.hca@meta.data)
+
+ref.bm.hca.list.sample <- SplitObject(object = ref.bm.hca, split.by = "sample")
+```
+
+
+```{r}
+process_objects <- function(x) {
+  x$percent.mt <- PercentageFeatureSet(object = x, pattern = "^MT-")
+  x <- x[, x$percent.mt < 5]
+  x <- SCTransform(x, variable.features.n = 3000)
+  x <- RunPCA(x)
+  return(x)
+}
+
+
+hca <- readRDS("seurat_objects/hca.scedgCM.rds")
+hca@meta.data$donor <-  str_split_fixed(rownames(hca@meta.data), "_", 2)[,1]
+hca$orig.ident <- hca$donor
+saveRDS(rownames(hca), file= "hca.rownames.rds")
+rownames(hca@assays$RNA@features) <- readRDS("annot2.hca.rds")$Symbol
+```
+
+
+#local
+```{r}
+annot <- readRDS("annotation.hca.rownames.rds")
+annot$Symbol <- annot[,2] #annot[,1]
+annot[annot[,2] %in% "",]$Symbol <-annot[annot[,2] %in% "",1]
+
+annot2 <- merge( data.frame(ensembl_gene_id = rownames(hca)),
+       annot, by = "ensembl_gene_id", all.x = T)
+dim(annot2)
+
+rownames(annot2) <- annot2$ensembl_gene_id
+annot2 <- annot2[rownames(hca),]
+dim(annot2)
+
+
+annot2[is.na(annot2$Symbol ), ]$Symbol <-  annot2[is.na(annot2$Symbol ), ]$ensembl_gene_id
+
+any(duplicated(annot2$Symbol))
+
+
+rownames(hca@assays$RNA@features) <- annot2$Symbol
+
+saveRDS(annot2, file = "../annot2.hca.rds")
+```
+
+
+
+```{r}
+hca@meta.data$sample <- 
+    paste0(str_split_fixed(colnames(hca),"-",3)[,3],
+              str_split_fixed(colnames(hca),"-",3)[,1]
+)
+hca@meta.data$probe <-   str_split_fixed(colnames(hca),"-",3)[,2]
+hca.sample.names <- unique(hca@meta.data$sample)
+head(hca@meta.data)
+
+unique(hca@meta.data$sample)
+hca.list.sample <- SplitObject(object = hca, split.by = "sample")
+```
+
+
+```{r}
+for (i in 1:63) {
+  for(j in 1:63) {
+  hca.list.sample[[i]]@meta.data[,paste0("hcaref",i , "___", j)] <- "NO"
+hca.list.sample[[i]]@meta.data[
+  str_split_fixed(colnames(hca.list.sample[[i]]),"-",3)[,2] %in% 
+        str_split_fixed(colnames( ref.bm.hca.list.sample[[j]]),"_",3)[,1],
+][,paste0("hcaref",i,"___", j)]  <- i
+  }
+  }
+
+
+for (i in 1:63) {
+A <- c()
+for(j in 1:63) {
+A <- c(A,table(hca.list.sample[[i]]@meta.data[,c("sample", paste0("hcaref",i , "___", j) )])[,1])
+}
+  
+hca.list.sample[[i]]@meta.data$name_in_ref <- names(ref.bm.hca.list.sample[(1:63)[A %in% max(A)]])
+}
+
+
+for( i in 1:63) {
+  print(i)
+  print(dim(hca.list.sample[[i]]))
+  print(dim(ref.bm.hca.list.sample[[unique(hca.list.sample[[i]]$name_in_ref)]])) 
+  print( dim(ref.bm.hca.list.sample[[unique(hca.list.sample[[i]]$name_in_ref)]])[2] == dim(subset(hca.list.sample[[i]], subset = probe %in% ref.bm.hca.list.sample[[unique(hca.list.sample[[i]]$name_in_ref)]]$probe))[2])
+  
+  print("____________________________")
+}
+  
+
+for( i in 1:63) {
+hca.list.sample[[i]] <- subset(hca.list.sample[[i]], subset = probe %in% ref.bm.hca.list.sample[[unique(hca.list.sample[[i]]$name_in_ref)]]$probe)
+  
+
+tmpmeta <- ref.bm.hca.list.sample[[unique(hca.list.sample[[i]]$name_in_ref)]]@meta.data
+dim(tmpmeta)
+rownames(tmpmeta) <- tmpmeta$probe
+dim(tmpmeta)
+tmpmeta <- tmpmeta[hca.list.sample[[i]]$probe ,]
+dim(tmpmeta)
+colnames(tmpmeta)
+hca.list.sample[[i]]@meta.data <- cbind(hca.list.sample[[i]]@meta.data,
+                                       tmpmeta[,c(1,2,6,7)] )
+}
+
+saveRDS(hca.list.sample, file = "seurat_objects/hca.list.sample.with_celltype_v2.rds")
+#head(hca.list.sample[[1]]@meta.data)
+```
+
+
+```{r}
+library(Matrix)
+library(Seurat)
+args <- c("seurat_objects/nhlbi.rds")
+
+data.dir <- "data/nhlbi"
+
+objs <- list()
+
+donors <- c("GSM3396161","GSM3396162","GSM3396163",
+           "GSM3396164","GSM3396165","GSM3396166",
+           "GSM3396167","GSM3396168","GSM3396169",
+           "GSM3396170","GSM3396171","GSM3396172",
+           "GSM3396173","GSM3396174","GSM3396175",
+           "GSM3396176","GSM3396177","GSM3396178",
+           "GSM3396179","GSM3396180","GSM3396181",
+           "GSM3396182","GSM3396183","GSM3396184","GSM3396185")
+
+for (i in 1:length(donors)) {
+  donor <- donors[[i]]
+  donor.dir <- file.path(data.dir, donor)
+  if (!dir.exists(paths = donor.dir)) {
+    files <- list.files(path = data.dir, pattern = paste0(donor, "_"))
+    system2(command = "mkdir", args = , donor.dir)
+    for (f in files) {
+      system2(command = "mv", args = paste0("-f ", c(file.path(data.dir, f), 
+                                                     file.path(donor.dir, gsub("_[a-zA-Z0-9]*", "", Seurat:::ExtractField(string = f, field = 2:3))))))
+      system2(command = "gunzip", args = file.path(donor.dir, 
+                                                   gsub("_[a-zA-Z0-9]*", "", Seurat:::ExtractField(string = f, field = 2:3))))
+    }
+  }
+  counts <- Read10X(data.dir = donor.dir)
+  objs[[i]] <- CreateSeuratObject(counts = counts)
+  objs[[i]][["percent.mt"]] <- PercentageFeatureSet(objs[[i]], pattern = "^MT-")
+ # objs[[i]] <- subset(objs[[i]], subset = nFeature_RNA > 500  & percent.mt < 8) #use same qc metrics as original paper
+  objs[[i]]$dataset <- donor
+}
+saveRDS(object = objs, file = args[1])
+```
+
+
+
+```{r}
+ref.bm.nhlbi <- subset(ref.bm, subset = dataset %in% 3:27)
+ref.bm.nhlbi@meta.data$sample <-   str_split_fixed(colnames(ref.bm.nhlbi),"-",2)[,2]
+unique(ref.bm.nhlbi@meta.data$sample)
+
+ref.bm.nhlbi@meta.data$probe <- str_split_fixed(colnames(ref.bm.nhlbi),"-",3)[,1]
+head(ref.bm.nhlbi@meta.data)
+
+ref.bm.nhlbi.list.sample <- SplitObject(object = ref.bm.nhlbi, split.by = "sample")
+```
+
+
+```{r}
+
+nhlbi.list.sample  <- objs
+  
+  
+
+for (i in 1:length(ref.bm.nhlbi.list.sample)) {
+  nhlbi.list.sample[[i]]@meta.data$probe <- str_split_fixed(colnames(nhlbi.list.sample[[i]]), "-", 2)[1]
+ nhlbi.list.sample[[i]]@meta.data$sample <- nhlbi.list.sample[[i]]@meta.data$dataset
+}
+ head(nhlbi.list.sample[[1]]@meta.data)
+
+ 
+ 
+ 
+for (i in 1:length(ref.bm.nhlbi.list.sample)) {
+  for(j in 1:length(ref.bm.nhlbi.list.sample)) {
+  nhlbi.list.sample[[i]]@meta.data[,paste0("nhlbiref",i , "___", j)] <- 0
+  if (any(nhlbi.list.sample[[i]]@meta.data$probe %in% ref.bm.nhlbi.list.sample[[j]]@meta.data$probe))
+  nhlbi.list.sample[[i]]@meta.data[ 
+                                   nhlbi.list.sample[[i]]@meta.data$probe %in% ref.bm.nhlbi.list.sample[[j]]@meta.data$probe,][,paste0("nhlbiref",i,"___", j)]  <- i
+  }
+  }
+
+
+for (i in 1:length(ref.bm.nhlbi.list.sample)) {
+A <- c()
+for (i in 1:length(ref.bm.nhlbi.list.sample)) {
+A <- c(A,table(nhlbi.list.sample[[i]]@meta.data[,c("sample", paste0("nhlbiref",i , "___", j) )])[,1])
+}
+  
+nhlbi.list.sample[[i]]@meta.data$name_in_ref <- names(ref.bm.nhlbi.list.sample[(1:25)[A %in% max(A)]])
+}
+ 
+ 
+ head(nhlbi.list.sample[[i]]@meta.data)
+ 
+```
+unique(nhlbi.list.sample[[i]]$name_in_ref)
+
+```{r}
+nhlbi.list.sample2 <- nhlbi.list.sample
+for( i in 1:25) {
+  nhlbi.list.sample[[i]]$probe <- str_split_fixed(colnames(nhlbi.list.sample[[i]]), "-",2)[,1]
+  nhlbi.list.sample2[[i]] <-  subset(nhlbi.list.sample[[i]], subset = probe %in% ref.bm.nhlbi.list.sample[[i]]$probe)
+}
+```
+  
+```{r}
+for (i in 1:1) {
+  print(i)
+  print(dim(nhlbi.list.sample[[i]]))
+   print(dim(nhlbi.list.sample2[[i]]))
+ print(dim(ref.bm.nhlbi.list.sample[[i]])) 
+}
+
+
+for( i in 1:25) {
+
+tmpmeta <- ref.bm.nhlbi.list.sample[[i]]@meta.data
+dim(tmpmeta)
+rownames(tmpmeta) <- tmpmeta$probe
+
+
+dim(tmpmeta)
+tmpmeta <- tmpmeta[nhlbi.list.sample2[[i]]$probe ,]
+rownames(tmpmeta)
+
+
+dim(tmpmeta)
+colnames(tmpmeta)
+head(tmpmeta)
+head(tmpmeta[,c(1,2,6,7)])
+
+nhlbi.list.sample2[[i]]@meta.data <- cbind(nhlbi.list.sample2[[i]]@meta.data,
+                                       tmpmeta[,c(1,2,6,7)] )
+}
+
+
+for( i in 1:25) {
+  #print(head(
+nhlbi.list.sample2[[i]]@meta.data  <- nhlbi.list.sample2[[i]]@meta.data[,c(1:6,33,34, 35,36)]
+#))
+}
+
+saveRDS(nhlbi.list.sample2, file = "seurat_objects/nhlbi.list.sample.with_celltype.rds")
+
+```
+
+
