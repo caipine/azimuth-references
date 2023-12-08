@@ -51,6 +51,10 @@ hca@meta.data$donor <-  str_split_fixed(rownames(hca@meta.data), "_", 2)[,1]
 hca$orig.ident <- hca$donor
 saveRDS(rownames(hca), file= "hca.rownames.rds")
 rownames(hca@assays$RNA@features) <- readRDS("annot2.hca.rds")$Symbol
+
+need <- (1:length(rownames(hca)) )[!grepl("^ENSG", rownames(hca))]
+hca <- hca[need,]
+hca
 ```
 
 
